@@ -1,0 +1,65 @@
+name: Post AI Comment
+description: >
+  Post a formatted comment to a GitHub PR or Issue using a GitHub App token.
+  The comment includes a hidden HTML marker for idempotency tracking.
+
+inputs:
+  github_token:
+    description: GitHub App installation token with pull_requests:write permission
+    required: true
+  body:
+    description: Comment body (markdown)
+    required: true
+  app_name:
+    description: Display name shown in the comment header
+    required: false
+    default: AI Review Bot
+  pr_number:
+    description: PR number to comment on (use this OR issue_number)
+    required: false
+    default: ''
+  issue_number:
+    description: Issue number to comment on (use this OR pr_number)
+    required: false
+    default: ''
+  repo:
+    description: Repository in 'owner/repo' format (defaults to current repo)
+    required: false
+    default: ${{ github.repository }}
+
+runs:
+  using: composite
+  steps:
+    - name: Format comment body
+      id: format
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.app_name }}
+        BODY: ${{ inputs.body }}
+      run: |
+        FORMATTED=$(bash "$GITHUB_ACTION_PATH/format-body.sh")
+        {
+          echo 'formatted<<AICLI_COMMENT_EOF'
+          printf '%s' "$FORMATTED"
+          echo ''
+          echo 'AICLI_COMMENT_EOF'
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Post comment
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        _REPO: ${{ inputs.repo }}
+        _PR: ${{ inputs.pr_number }}
+        _ISSUE: ${{ inputs.issue_number }}
+        _BODY: ${{ steps.format.outputs.formatted }}
+      run: |
+        printf '%s' "$_BODY" > /tmp/aicli-comment-body.md
+        if [[ -n "$_PR" ]]; then
+          gh pr comment "$_PR" --repo "$_REPO" --body-file /tmp/aicli-comment-body.md
+        elif [[ -n "$_ISSUE" ]]; then
+          gh issue comment "$_ISSUE" --repo "$_REPO" --body-file /tmp/aicli-comment-body.md
+        else
+          echo "Error: provide pr_number or issue_number" >&2
+          exit 1
+        fi

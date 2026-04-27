@@ -1,0 +1,114 @@
+name: AI Command
+
+# Reusable workflow — call this when a user mentions @ai-cli in a comment.
+#
+# The user's free-form text (everything after @ai-cli) is sent directly to the
+# AI as a prompt. An optional skill and rules can be provided to give the AI
+# a consistent persona and constraints.
+
+on:
+  workflow_call:
+    inputs:
+      command:
+        description: >
+          Free-form instruction text extracted from the @ai-cli mention.
+          This becomes the primary prompt sent to the AI.
+        type: string
+        required: true
+      skill_name:
+        description: >
+          Optional predefined skill to apply for this command.
+          When set, the skill's persona and instructions frame the response.
+        type: string
+        required: false
+        default: ''
+      skill_file_content:
+        description: >
+          Optional inline skill content. Takes precedence over skill_name.
+        type: string
+        required: false
+        default: ''
+      rules:
+        description: >
+          Comma-separated rule names from .rules/ to apply alongside the command.
+        type: string
+        required: false
+        default: ''
+      pr_number:
+        description: PR number to reply to (provide pr_number or issue_number)
+        type: number
+        required: false
+        default: 0
+      issue_number:
+        description: Issue number to reply to (provide pr_number or issue_number)
+        type: number
+        required: false
+        default: 0
+      app_name:
+        description: Display name shown in the reply comment header
+        type: string
+        required: false
+        default: AI Review Bot
+      runner:
+        description: GitHub Actions runner label
+        type: string
+        required: false
+        default: ubuntu-latest
+    secrets:
+      AI_API_KEY:
+        description: API key for the AI tool
+        required: true
+      APP_TOKEN:
+        description: GitHub App installation token (pull_requests:write, issues:write)
+        required: true
+
+jobs:
+  run-command:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      # ── 1. Check out this workflow's own repository ──────────────────────
+      - name: Parse workflow repository and ref
+        id: wf
+        run: |
+          WF_REF="${{ github.workflow_ref }}"
+          echo "repo=$(echo "$WF_REF" | sed 's|/\.github/.*||')" >> "$GITHUB_OUTPUT"
+          echo "ref=$(echo "$WF_REF" | sed 's|.*@||')"           >> "$GITHUB_OUTPUT"
+
+      - name: Checkout aicli-workflow repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.wf.outputs.repo }}
+          ref: ${{ steps.wf.outputs.ref }}
+          path: .aicli
+          persist-credentials: false
+
+      - name: Export aicli repo path for composite actions
+        run: echo "AICLI_REPO_PATH=$GITHUB_WORKSPACE/.aicli" >> "$GITHUB_ENV"
+
+      # ── 2. Install AI CLI ─────────────────────────────────────────────────
+      - name: Setup AI CLI
+        uses: ./.aicli/.github/actions/setup-ai-cli
+        with:
+          api_key: ${{ secrets.AI_API_KEY }}
+
+      # ── 3. Execute the user's command ─────────────────────────────────────
+      - name: Run AI command
+        id: ai
+        uses: ./.aicli/.github/actions/run-ai-task
+        with:
+          skill_name: ${{ inputs.skill_name }}
+          skill_file_content: ${{ inputs.skill_file_content }}
+          rules: ${{ inputs.rules }}
+          prompt: ${{ inputs.command }}
+          output_format: markdown
+
+      # ── 4. Reply as a comment ─────────────────────────────────────────────
+      - name: Post reply comment
+        uses: ./.aicli/.github/actions/post-comment
+        with:
+          github_token: ${{ secrets.APP_TOKEN }}
+          body: ${{ steps.ai.outputs.result }}
+          app_name: ${{ inputs.app_name }}
+          pr_number: ${{ inputs.pr_number != 0 && inputs.pr_number || '' }}
+          issue_number: ${{ inputs.issue_number != 0 && inputs.issue_number || '' }}
+          repo: ${{ github.repository }}

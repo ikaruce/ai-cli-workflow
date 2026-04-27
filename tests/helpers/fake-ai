@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# fake-ai — test double for the AI CLI tool
+#
+# Echoes the prompt it receives along with diagnostic env vars so tests can
+# assert on prompt construction without making real API calls.
+#
+# Maps AI_CLI_API_KEY → FAKE_AI_API_KEY (mirrors how ai-cli.sh maps to
+# tool-specific env vars) to let tests verify API key propagation.
+
+FAKE_AI_API_KEY="${FAKE_AI_API_KEY:-${AI_CLI_API_KEY:-}}"
+
+MODEL=""
+PROMPT=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--prompt) PROMPT="$2"; shift 2 ;;
+    --model)     MODEL="$2";  shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+# Print diagnostics that tests can assert on
+echo "FAKE_AI_API_KEY=${FAKE_AI_API_KEY}"
+echo "MODEL=${MODEL}"
+echo "---PROMPT---"
+printf '%s' "$PROMPT"

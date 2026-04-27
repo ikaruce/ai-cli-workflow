@@ -1,0 +1,53 @@
+name: Setup AI CLI
+description: >
+  Install the AI CLI tool and export AI_CLI_* environment variables.
+  After this action runs, subsequent steps can call `ai-cli` directly.
+
+inputs:
+  ai_tool:
+    description: AI tool to install. Currently supported out of the box: gemini
+    default: gemini
+  tool_version:
+    description: npm version tag to install ('latest' or a specific semver)
+    default: latest
+  api_key:
+    description: API key for the AI tool
+    required: true
+  model:
+    description: Default model ID passed to every ai-cli invocation (optional)
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install Gemini CLI
+      if: inputs.ai_tool == 'gemini'
+      shell: bash
+      run: |
+        PKG="@google/gemini-cli"
+        VERSION="${{ inputs.tool_version }}"
+        if [[ "$VERSION" == "latest" ]]; then
+          npm install -g "$PKG" --silent
+        else
+          npm install -g "${PKG}@${VERSION}" --silent
+        fi
+
+    - name: Install ai-cli wrapper script
+      shell: bash
+      run: |
+        install -m 755 "$GITHUB_ACTION_PATH/ai-cli.sh" /usr/local/bin/ai-cli
+
+    - name: Export AI CLI environment variables
+      shell: bash
+      env:
+        _AI_TOOL: ${{ inputs.ai_tool }}
+        _API_KEY: ${{ inputs.api_key }}
+        _MODEL: ${{ inputs.model }}
+      run: |
+        echo "AI_CLI_TOOL=${_AI_TOOL}"       >> "$GITHUB_ENV"
+        echo "AI_CLI_API_KEY=${_API_KEY}"    >> "$GITHUB_ENV"
+        [[ -n "$_MODEL" ]] && echo "AI_CLI_MODEL=${_MODEL}" >> "$GITHUB_ENV"
+        # Tool-specific API key env vars (for tools that read their own var)
+        case "$_AI_TOOL" in
+          gemini) echo "GEMINI_API_KEY=${_API_KEY}" >> "$GITHUB_ENV" ;;
+        esac

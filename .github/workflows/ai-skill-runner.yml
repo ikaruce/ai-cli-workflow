@@ -1,0 +1,112 @@
+name: AI Skill Runner
+
+# Reusable workflow — call this from your repository's dispatch workflow.
+#
+# Runs a predefined or user-supplied skill against the provided context and
+# posts the result as a comment on the specified PR.
+
+on:
+  workflow_call:
+    inputs:
+      skill_name:
+        description: >
+          Name of a predefined skill in this repository's .skills/ directory.
+          Ignored when skill_file_content is provided.
+        type: string
+        required: false
+        default: ''
+      skill_file_content:
+        description: >
+          Inline skill file content (SKILL.md format).
+          Use this to supply a custom skill without modifying this repository.
+          Takes precedence over skill_name.
+        type: string
+        required: false
+        default: ''
+      rules:
+        description: >
+          Comma-separated names of rule files to apply from .rules/ directory.
+          (e.g. 'code-inspection-common')
+        type: string
+        required: false
+        default: code-inspection-common
+      context_content:
+        description: >
+          Content for the AI to process (e.g., PR diff).
+          When omitted, the skill is expected to gather its own context.
+        type: string
+        required: false
+        default: ''
+      pr_number:
+        description: PR number to post the review comment on
+        type: number
+        required: true
+      app_name:
+        description: Display name used in the comment header
+        type: string
+        required: false
+        default: AI Review Bot
+      runner:
+        description: GitHub Actions runner label
+        type: string
+        required: false
+        default: ubuntu-latest
+    secrets:
+      AI_API_KEY:
+        description: API key for the AI tool
+        required: true
+      APP_TOKEN:
+        description: GitHub App installation token (pull_requests:write)
+        required: true
+
+jobs:
+  run-skill:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      # ── 1. Check out this workflow's own repository ──────────────────────
+      #    Needed to access .skills/ and .rules/ file trees and composite actions.
+      - name: Parse workflow repository and ref
+        id: wf
+        run: |
+          # github.workflow_ref format: owner/repo/.github/workflows/file.yml@ref
+          WF_REF="${{ github.workflow_ref }}"
+          echo "repo=$(echo "$WF_REF" | sed 's|/\.github/.*||')" >> "$GITHUB_OUTPUT"
+          echo "ref=$(echo "$WF_REF" | sed 's|.*@||')"           >> "$GITHUB_OUTPUT"
+
+      - name: Checkout aicli-workflow repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.wf.outputs.repo }}
+          ref: ${{ steps.wf.outputs.ref }}
+          path: .aicli
+          persist-credentials: false
+
+      - name: Export aicli repo path for composite actions
+        run: echo "AICLI_REPO_PATH=$GITHUB_WORKSPACE/.aicli" >> "$GITHUB_ENV"
+
+      # ── 2. Install AI CLI ─────────────────────────────────────────────────
+      - name: Setup AI CLI
+        uses: ./.aicli/.github/actions/setup-ai-cli
+        with:
+          api_key: ${{ secrets.AI_API_KEY }}
+
+      # ── 3. Run the skill ──────────────────────────────────────────────────
+      - name: Run AI skill
+        id: ai
+        uses: ./.aicli/.github/actions/run-ai-task
+        with:
+          skill_name: ${{ inputs.skill_name }}
+          skill_file_content: ${{ inputs.skill_file_content }}
+          rules: ${{ inputs.rules }}
+          context_content: ${{ inputs.context_content }}
+          output_format: markdown
+
+      # ── 4. Post result as PR comment ──────────────────────────────────────
+      - name: Post review comment
+        uses: ./.aicli/.github/actions/post-comment
+        with:
+          github_token: ${{ secrets.APP_TOKEN }}
+          body: ${{ steps.ai.outputs.result }}
+          app_name: ${{ inputs.app_name }}
+          pr_number: ${{ inputs.pr_number }}
+          repo: ${{ github.repository }}

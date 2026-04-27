@@ -1,0 +1,111 @@
+name: Run AI Task
+description: >
+  Execute an AI task using the configured AI CLI tool and return the result.
+  Must be preceded by the setup-ai-cli action in the same job.
+
+inputs:
+  skill_name:
+    description: >
+      Name of a predefined skill in this repository's .skills/ directory
+      (e.g. 'code-review-commons'). Ignored when skill_file_content is set.
+    required: false
+    default: ''
+  skill_file_content:
+    description: >
+      Inline SKILL.md content. Takes precedence over skill_name.
+      Use this to supply a custom skill without referencing this repository.
+    required: false
+    default: ''
+  rules:
+    description: >
+      Comma-separated names of rule files to apply from this repository's
+      .rules/ directory (e.g. 'code-inspection-common').
+      Leave empty to skip rule loading.
+    required: false
+    default: ''
+  prompt:
+    description: Free-form prompt text. Combined with skill/rules when provided.
+    required: false
+    default: ''
+  context_content:
+    description: >
+      Content to process (e.g., a PR diff). Written to a temp file and appended
+      under an '## Input' section in the prompt.
+    required: false
+    default: ''
+  output_format:
+    description: Output format — markdown or json
+    required: false
+    default: markdown
+
+outputs:
+  result:
+    description: AI-generated output (markdown or JSON string)
+    value: ${{ steps.run.outputs.result }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve skill file
+      id: skill
+      shell: bash
+      env:
+        _SKILL_NAME: ${{ inputs.skill_name }}
+        _SKILL_CONTENT: ${{ inputs.skill_file_content }}
+        # AICLI_REPO_PATH is set by the reusable workflow after checkout
+        SKILLS_BASE_DIR: ${{ env.AICLI_REPO_PATH || '.' }}
+      run: |
+        PATH_OUT=$(SKILL_NAME="$_SKILL_NAME" \
+                   SKILL_FILE_CONTENT="$_SKILL_CONTENT" \
+                   bash "$GITHUB_ACTION_PATH/resolve-skill.sh")
+        echo "path=$PATH_OUT" >> "$GITHUB_OUTPUT"
+
+    - name: Resolve rules files
+      id: rules
+      shell: bash
+      env:
+        _RULES: ${{ inputs.rules }}
+        # AICLI_REPO_PATH is set by the reusable workflow after checkout
+        _BASE: ${{ env.AICLI_REPO_PATH || '.' }}
+      run: |
+        > /tmp/aicli-rule-paths.txt
+        IFS=',' read -ra NAMES <<< "$_RULES"
+        for NAME in "${NAMES[@]}"; do
+          NAME="${NAME//[[:space:]]/}"
+          [[ -z "$NAME" ]] && continue
+          RULE_FILE="${_BASE}/.rules/${NAME}.md"
+          [[ -f "$RULE_FILE" ]] && echo "$RULE_FILE" >> /tmp/aicli-rule-paths.txt
+        done
+
+    - name: Write context to temp file
+      if: inputs.context_content != ''
+      shell: bash
+      env:
+        _CONTEXT: ${{ inputs.context_content }}
+      run: |
+        printf '%s' "$_CONTEXT" > /tmp/aicli-context.md
+
+    - name: Run ai-cli
+      id: run
+      shell: bash
+      env:
+        _SKILL_PATH: ${{ steps.skill.outputs.path }}
+        _PROMPT: ${{ inputs.prompt }}
+        _OUTPUT_FORMAT: ${{ inputs.output_format }}
+      run: |
+        ARGS=()
+        [[ -n "$_SKILL_PATH" && -f "$_SKILL_PATH" ]] && ARGS+=(--skill "$_SKILL_PATH")
+        while IFS= read -r RULE; do
+          [[ -n "$RULE" ]] && ARGS+=(--rules "$RULE")
+        done < /tmp/aicli-rule-paths.txt
+        [[ -n "$_PROMPT" ]] && ARGS+=(--prompt "$_PROMPT")
+        [[ -f /tmp/aicli-context.md ]] && ARGS+=(--context /tmp/aicli-context.md)
+        ARGS+=(--output-format "$_OUTPUT_FORMAT")
+
+        RESULT=$(ai-cli "${ARGS[@]}")
+        {
+          echo 'result<<AICLI_RESULT_EOF'
+          printf '%s' "$RESULT"
+          echo ''
+          echo 'AICLI_RESULT_EOF'
+        } >> "$GITHUB_OUTPUT"
