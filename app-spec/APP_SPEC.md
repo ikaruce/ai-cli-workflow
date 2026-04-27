@@ -70,26 +70,32 @@ This value is substituted into the dispatch workflow template and used as the
 default for comment headers (users can override per-repo via `AI_CLI_APP_NAME`
 repository variable).
 
-## Secrets Written to User Repositories
+## Secrets and Variables in User Repositories
 
-After installation, the App writes:
+The App does **not** write secrets to user repositories.
 
-| Secret name          | Value                                                  |
-|----------------------|--------------------------------------------------------|
-| `AI_CLI_APP_TOKEN`   | A freshly generated GitHub App installation token      |
+The user sets the following **once** after merging the provisioned PR:
 
-The App is responsible for refreshing `AI_CLI_APP_TOKEN` before it expires
-(GitHub App installation tokens expire after 1 hour).
+| Name | Type | Value |
+|------|------|-------|
+| `AI_CLI_API_KEY` | Secret | AI provider key (e.g. Gemini) — set manually by user |
+| `AI_CLI_APP_TOKEN` | Secret | Static API key for the App backend (from `API_KEY` in `.env`) |
+| `AIBOT_URL` | Variable | Backend URL (e.g. `https://aibot.example.com`) |
+
+At workflow runtime the dispatch workflow calls `POST /api/v1/token` using
+`AI_CLI_APP_TOKEN` as the Bearer key and receives a fresh GitHub installation
+token. The installation token is masked (`::add-mask::`) and passed to
+reusable workflows as `APP_TOKEN`. It is never stored anywhere.
 
 ## Interface Contract with Reusable Workflows
 
 The reusable workflows in this repository expect the caller's dispatch workflow
 to provide:
 
-| Input / Secret     | Source                          | Notes                               |
-|--------------------|---------------------------------|-------------------------------------|
-| `AI_API_KEY`       | User's `AI_CLI_API_KEY` secret  | Set manually by the user            |
-| `APP_TOKEN`        | User's `AI_CLI_APP_TOKEN` secret| Written/refreshed by the App        |
-| `app_name`         | `AI_CLI_APP_NAME` variable      | Falls back to `{{APP_NAME}}`        |
-| `skill_name`       | `AI_CLI_SKILL` variable         | Falls back to `code-review-commons` |
-| `rules`            | `AI_CLI_RULES` variable         | Falls back to `code-inspection-common`|
+| Input / Secret     | Source                                          | Notes                               |
+|--------------------|-------------------------------------------------|-------------------------------------|
+| `AI_API_KEY`       | User's `AI_CLI_API_KEY` secret                  | Set manually by the user            |
+| `APP_TOKEN`        | Runtime output of `get-token` job               | Fetched from App backend each run   |
+| `app_name`         | `AI_CLI_APP_NAME` variable                      | Falls back to `{{APP_NAME}}`        |
+| `skill_name`       | `AI_CLI_SKILL` variable                         | Falls back to `code-review-commons` |
+| `rules`            | `AI_CLI_RULES` variable                         | Falls back to `code-inspection-common`|
