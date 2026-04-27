@@ -49,11 +49,15 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+        # Strip protocol from github.server_url so gh CLI targets the right host
+        # (github.com on GitHub.com, ghes.example.com on GHES).
+        SERVER_URL: ${{ github.server_url }}
         _REPO: ${{ inputs.repo }}
         _PR: ${{ inputs.pr_number }}
         _ISSUE: ${{ inputs.issue_number }}
         _BODY: ${{ steps.format.outputs.formatted }}
       run: |
+        export GH_HOST="${SERVER_URL#https://}"
         printf '%s' "$_BODY" > /tmp/aicli-comment-body.md
         if [[ -n "$_PR" ]]; then
           gh pr comment "$_PR" --repo "$_REPO" --body-file /tmp/aicli-comment-body.md
