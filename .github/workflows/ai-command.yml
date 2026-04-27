@@ -81,17 +81,32 @@ jobs:
     runs-on: ${{ inputs.runner }}
     steps:
       # ── 1. Fetch a fresh GitHub App installation token from the aibot backend.
+      #    Falls back to the workflow's GITHUB_TOKEN if the backend call fails.
       - name: Fetch installation token
         id: token
         env:
-          AIBOT_URL: ${{ inputs.aibot_url }}
-          API_KEY:   ${{ secrets.AIBOT_API_KEY }}
+          AIBOT_URL:      ${{ inputs.aibot_url }}
+          API_KEY:        ${{ secrets.AIBOT_API_KEY }}
+          FALLBACK_TOKEN: ${{ github.token }}
         run: |
+          set +e
           RESPONSE=$(curl -sf -X POST "$AIBOT_URL/api/v1/token" \
             -H "Authorization: Bearer $API_KEY" \
             -H "Content-Type: application/json" \
             -d "{\"repo\": \"$GITHUB_REPOSITORY\"}")
-          TOKEN=$(echo "$RESPONSE" | jq -r .token)
+          CURL_EXIT=$?
+          set -e
+
+          TOKEN=""
+          if [[ $CURL_EXIT -eq 0 ]]; then
+            TOKEN=$(echo "$RESPONSE" | jq -r .token)
+          fi
+
+          if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
+            echo "::warning::Failed to fetch installation token from aibot (curl exit=$CURL_EXIT); falling back to workflow GITHUB_TOKEN"
+            TOKEN="$FALLBACK_TOKEN"
+          fi
+
           echo "::add-mask::$TOKEN"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
 
