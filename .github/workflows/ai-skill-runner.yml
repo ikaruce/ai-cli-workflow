@@ -66,7 +66,7 @@ on:
         description: API key for the AI tool
         required: true
       APP_TOKEN:
-        description: GitHub App installation token (pull_requests:write)
+        description: "GitHub App installation token (pull_requests:write)"
         required: true
 
 jobs:

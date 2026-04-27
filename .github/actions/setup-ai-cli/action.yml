@@ -5,16 +5,16 @@ description: >
 
 inputs:
   ai_tool:
-    description: AI tool to install. Currently supported out of the box: gemini
+    description: "AI tool to install. Currently supported out of the box: gemini"
     default: gemini
   tool_version:
-    description: npm version tag to install ('latest' or a specific semver)
+    description: "npm version tag to install ('latest' or a specific semver)"
     default: latest
   api_key:
-    description: API key for the AI tool
+    description: "API key for the AI tool"
     required: true
   model:
-    description: Default model ID passed to every ai-cli invocation (optional)
+    description: "Default model ID passed to every ai-cli invocation (optional)"
     default: ''
 
 runs:

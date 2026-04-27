@@ -5,7 +5,7 @@ description: >
 
 inputs:
   github_token:
-    description: GitHub App installation token with pull_requests:write permission
+    description: "GitHub App installation token with pull_requests:write permission"
     required: true
   body:
     description: Comment body (markdown)
