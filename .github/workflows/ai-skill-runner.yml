@@ -51,6 +51,16 @@ on:
         type: string
         required: false
         default: ubuntu-latest
+      aicli_repo:
+        description: Source repository containing this reusable workflow's skills, rules, and composite actions.
+        type: string
+        required: false
+        default: ikaruce/ai-cli-workflow
+      aicli_ref:
+        description: Git ref (branch/tag/SHA) to check out from aicli_repo.
+        type: string
+        required: false
+        default: main
     secrets:
       AI_API_KEY:
         description: API key for the AI tool
@@ -63,21 +73,14 @@ jobs:
   run-skill:
     runs-on: ${{ inputs.runner }}
     steps:
-      # ── 1. Check out this workflow's own repository ──────────────────────
-      #    Needed to access .skills/ and .rules/ file trees and composite actions.
-      - name: Parse workflow repository and ref
-        id: wf
-        run: |
-          # github.workflow_ref format: owner/repo/.github/workflows/file.yml@ref
-          WF_REF="${{ github.workflow_ref }}"
-          echo "repo=$(echo "$WF_REF" | sed 's|/\.github/.*||')" >> "$GITHUB_OUTPUT"
-          echo "ref=$(echo "$WF_REF" | sed 's|.*@||')"           >> "$GITHUB_OUTPUT"
-
+      # ── 1. Check out this workflow's own source (skills, rules, actions) ──
+      #    github.workflow_ref points at the caller in reusable workflows,
+      #    so the source repo must be passed explicitly via inputs.
       - name: Checkout aicli-workflow repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ steps.wf.outputs.repo }}
-          ref: ${{ steps.wf.outputs.ref }}
+          repository: ${{ inputs.aicli_repo }}
+          ref: ${{ inputs.aicli_ref }}
           path: .aicli
           persist-credentials: false
 
