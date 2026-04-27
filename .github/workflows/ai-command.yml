@@ -64,19 +64,38 @@ on:
         type: string
         required: false
         default: main
+      aibot_url:
+        description: "URL of the aibot backend (used to fetch a fresh GitHub App installation token)"
+        type: string
+        required: true
     secrets:
       AI_API_KEY:
         description: API key for the AI tool
         required: true
-      APP_TOKEN:
-        description: "GitHub App installation token (pull_requests:write, issues:write)"
+      AIBOT_API_KEY:
+        description: "Static API key for the aibot backend, used to authorize POST /api/v1/token"
         required: true
 
 jobs:
   run-command:
     runs-on: ${{ inputs.runner }}
     steps:
-      # ── 1. Check out this workflow's own source (skills, rules, actions) ──
+      # ── 1. Fetch a fresh GitHub App installation token from the aibot backend.
+      - name: Fetch installation token
+        id: token
+        env:
+          AIBOT_URL: ${{ inputs.aibot_url }}
+          API_KEY:   ${{ secrets.AIBOT_API_KEY }}
+        run: |
+          RESPONSE=$(curl -sf -X POST "$AIBOT_URL/api/v1/token" \
+            -H "Authorization: Bearer $API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"repo\": \"$GITHUB_REPOSITORY\"}")
+          TOKEN=$(echo "$RESPONSE" | jq -r .token)
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      # ── 2. Check out this workflow's own source (skills, rules, actions) ──
       - name: Checkout aicli-workflow repository
         uses: actions/checkout@v4
         with:
@@ -88,13 +107,13 @@ jobs:
       - name: Export aicli repo path for composite actions
         run: echo "AICLI_REPO_PATH=$GITHUB_WORKSPACE/.aicli" >> "$GITHUB_ENV"
 
-      # ── 2. Install AI CLI ─────────────────────────────────────────────────
+      # ── 3. Install AI CLI ─────────────────────────────────────────────────
       - name: Setup AI CLI
         uses: ./.aicli/.github/actions/setup-ai-cli
         with:
           api_key: ${{ secrets.AI_API_KEY }}
 
-      # ── 3. Execute the user's command ─────────────────────────────────────
+      # ── 4. Execute the user's command ─────────────────────────────────────
       - name: Run AI command
         id: ai
         uses: ./.aicli/.github/actions/run-ai-task
@@ -105,11 +124,11 @@ jobs:
           prompt: ${{ inputs.command }}
           output_format: markdown
 
-      # ── 4. Reply as a comment ─────────────────────────────────────────────
+      # ── 5. Reply as a comment ─────────────────────────────────────────────
       - name: Post reply comment
         uses: ./.aicli/.github/actions/post-comment
         with:
-          github_token: ${{ secrets.APP_TOKEN }}
+          github_token: ${{ steps.token.outputs.token }}
           body: ${{ steps.ai.outputs.result }}
           app_name: ${{ inputs.app_name }}
           pr_number: ${{ inputs.pr_number != 0 && inputs.pr_number || '' }}

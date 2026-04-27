@@ -61,19 +61,40 @@ on:
         type: string
         required: false
         default: main
+      aibot_url:
+        description: "URL of the aibot backend (used to fetch a fresh GitHub App installation token)"
+        type: string
+        required: true
     secrets:
       AI_API_KEY:
         description: API key for the AI tool
         required: true
-      APP_TOKEN:
-        description: "GitHub App installation token (pull_requests:write)"
+      AIBOT_API_KEY:
+        description: "Static API key for the aibot backend, used to authorize POST /api/v1/token"
         required: true
 
 jobs:
   run-skill:
     runs-on: ${{ inputs.runner }}
     steps:
-      # ── 1. Check out this workflow's own source (skills, rules, actions) ──
+      # ── 1. Fetch a fresh GitHub App installation token from the aibot backend.
+      #    Done inside this job so the masked output stays accessible to
+      #    subsequent steps (cross-job propagation strips masked values).
+      - name: Fetch installation token
+        id: token
+        env:
+          AIBOT_URL: ${{ inputs.aibot_url }}
+          API_KEY:   ${{ secrets.AIBOT_API_KEY }}
+        run: |
+          RESPONSE=$(curl -sf -X POST "$AIBOT_URL/api/v1/token" \
+            -H "Authorization: Bearer $API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"repo\": \"$GITHUB_REPOSITORY\"}")
+          TOKEN=$(echo "$RESPONSE" | jq -r .token)
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      # ── 2. Check out this workflow's own source (skills, rules, actions) ──
       #    github.workflow_ref points at the caller in reusable workflows,
       #    so the source repo must be passed explicitly via inputs.
       - name: Checkout aicli-workflow repository
@@ -87,13 +108,13 @@ jobs:
       - name: Export aicli repo path for composite actions
         run: echo "AICLI_REPO_PATH=$GITHUB_WORKSPACE/.aicli" >> "$GITHUB_ENV"
 
-      # ── 2. Install AI CLI ─────────────────────────────────────────────────
+      # ── 3. Install AI CLI ─────────────────────────────────────────────────
       - name: Setup AI CLI
         uses: ./.aicli/.github/actions/setup-ai-cli
         with:
           api_key: ${{ secrets.AI_API_KEY }}
 
-      # ── 3. Run the skill ──────────────────────────────────────────────────
+      # ── 4. Run the skill ──────────────────────────────────────────────────
       - name: Run AI skill
         id: ai
         uses: ./.aicli/.github/actions/run-ai-task
@@ -104,11 +125,11 @@ jobs:
           context_content: ${{ inputs.context_content }}
           output_format: markdown
 
-      # ── 4. Post result as PR comment ──────────────────────────────────────
+      # ── 5. Post result as PR comment ──────────────────────────────────────
       - name: Post review comment
         uses: ./.aicli/.github/actions/post-comment
         with:
-          github_token: ${{ secrets.APP_TOKEN }}
+          github_token: ${{ steps.token.outputs.token }}
           body: ${{ steps.ai.outputs.result }}
           app_name: ${{ inputs.app_name }}
           pr_number: ${{ inputs.pr_number }}
