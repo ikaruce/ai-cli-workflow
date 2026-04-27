@@ -156,7 +156,7 @@ case "$AI_TOOL" in
   gemini)
     # Trust the workspace folder in headless/CI environments
     export GEMINI_CLI_TRUST_WORKSPACE=true
-    TOOL_ARGS=(-p "$(cat "$PROMPT_FILE")" --yolo)
+    TOOL_ARGS=(-p "$(cat "$PROMPT_FILE")" --yolo --skip-trust)
     [[ -n "$MODEL" ]] && TOOL_ARGS+=(--model "$MODEL")
     gemini "${TOOL_ARGS[@]}"
     ;;
