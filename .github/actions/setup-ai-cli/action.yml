@@ -37,6 +37,30 @@ runs:
       run: |
         install -m 755 "$GITHUB_ACTION_PATH/ai-cli.sh" /usr/local/bin/ai-cli
 
+    - name: Configure Gemini CLI to enable shell + file tools
+      if: inputs.ai_tool == 'gemini'
+      shell: bash
+      run: |
+        # Gemini CLI in headless mode does not auto-enable run_shell_command;
+        # explicitly list the core tools the skill needs (gh CLI, file reads, etc.).
+        mkdir -p "$HOME/.gemini"
+        cat > "$HOME/.gemini/settings.json" <<'JSON'
+        {
+          "coreTools": [
+            "run_shell_command",
+            "read_file",
+            "write_file",
+            "edit",
+            "list_directory",
+            "search_file_content",
+            "glob",
+            "save_memory",
+            "web_fetch",
+            "google_web_search"
+          ]
+        }
+        JSON
+
     - name: Export AI CLI environment variables
       shell: bash
       env:
