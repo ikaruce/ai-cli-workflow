@@ -58,6 +58,11 @@ runs:
         _ISSUE: ${{ inputs.issue_number }}
         _BODY: ${{ steps.format.outputs.formatted }}
       run: |
+        if [[ -z "$GH_TOKEN" ]]; then
+          echo "::error::GH_TOKEN is empty — token fetch upstream returned no value."
+          exit 1
+        fi
+        echo "GH_HOST=$GH_HOST  |  GH_TOKEN length=${#GH_TOKEN}"
         printf '%s' "$_BODY" > /tmp/aicli-comment-body.md
         if [[ -n "$_PR" ]]; then
           gh pr comment "$_PR" --repo "$_REPO" --body-file /tmp/aicli-comment-body.md

@@ -68,11 +68,20 @@ on:
         description: "URL of the aibot backend (used to fetch a fresh GitHub App installation token)"
         type: string
         required: true
+      allow_github_token_fallback:
+        description: >
+          When true, fall back to the workflow's built-in GITHUB_TOKEN if the
+          aibot backend can't issue an installation token. Off by default
+          because the fallback token has narrower permissions and may produce
+          downstream 401/403 errors that hide the real backend failure.
+        type: boolean
+        required: false
+        default: false
     secrets:
-      AI_API_KEY:
-        description: API key for the AI tool
+      AI_CLI_API_KEY:
+        description: API key for the AI tool (Gemini, etc.)
         required: true
-      AIBOT_API_KEY:
+      AI_CLI_APP_TOKEN:
         description: "Static API key for the aibot backend, used to authorize POST /api/v1/token"
         required: true
 
@@ -86,28 +95,46 @@ jobs:
         id: token
         env:
           AIBOT_URL:      ${{ inputs.aibot_url }}
-          API_KEY:        ${{ secrets.AIBOT_API_KEY }}
+          API_KEY:        ${{ secrets.AI_CLI_APP_TOKEN }}
+          ALLOW_FALLBACK: ${{ inputs.allow_github_token_fallback }}
           FALLBACK_TOKEN: ${{ github.token }}
         run: |
           set +e
-          RESPONSE=$(curl -sf -X POST "$AIBOT_URL/api/v1/token" \
+          RESPONSE=$(curl -s -w '\n%{http_code}' -X POST "$AIBOT_URL/api/v1/token" \
             -H "Authorization: Bearer $API_KEY" \
             -H "Content-Type: application/json" \
             -d "{\"repo\": \"$GITHUB_REPOSITORY\"}")
           CURL_EXIT=$?
           set -e
 
+          HTTP_CODE=$(printf '%s' "$RESPONSE" | tail -n1)
+          BODY=$(printf '%s' "$RESPONSE" | sed '$d')
+
           TOKEN=""
-          if [[ $CURL_EXIT -eq 0 ]]; then
-            TOKEN=$(echo "$RESPONSE" | jq -r .token)
+          if [[ $CURL_EXIT -eq 0 && "$HTTP_CODE" == "200" ]]; then
+            TOKEN=$(printf '%s' "$BODY" | jq -r .token)
           fi
 
+          SOURCE="aibot"
           if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
-            echo "::warning::Failed to fetch installation token from aibot (curl exit=$CURL_EXIT); falling back to workflow GITHUB_TOKEN"
-            TOKEN="$FALLBACK_TOKEN"
+            if [[ "$ALLOW_FALLBACK" == "true" ]]; then
+              echo "::warning::aibot token fetch failed (curl=$CURL_EXIT, http=$HTTP_CODE). Falling back to workflow GITHUB_TOKEN — the fallback token has narrower permissions and may produce 401/403 downstream."
+              TOKEN="$FALLBACK_TOKEN"
+              SOURCE="github.token (fallback, opt-in)"
+            else
+              echo "::error::aibot token fetch failed (curl=$CURL_EXIT, http=$HTTP_CODE). Set inputs.allow_github_token_fallback=true to permit the GITHUB_TOKEN fallback, or fix the backend / AI_CLI_APP_TOKEN."
+              echo "Backend response body (first 500 chars): ${BODY:0:500}"
+              exit 1
+            fi
+          fi
+
+          if [[ -z "$TOKEN" ]]; then
+            echo "::error::Token resolved to empty value."
+            exit 1
           fi
 
           echo "::add-mask::$TOKEN"
+          echo "Token source: $SOURCE  |  length: ${#TOKEN}"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
 
       # ── 2. Check out this workflow's own source (skills, rules, actions) ──
@@ -126,7 +153,7 @@ jobs:
       - name: Setup AI CLI
         uses: ./.aicli/.github/actions/setup-ai-cli
         with:
-          api_key: ${{ secrets.AI_API_KEY }}
+          api_key: ${{ secrets.AI_CLI_API_KEY }}
 
       # ── 4. Execute the user's command ─────────────────────────────────────
       - name: Run AI command
